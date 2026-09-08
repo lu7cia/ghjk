@@ -32,9 +32,14 @@ function secs(n: number): string {
 export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Post) => void }) {
   const [params, setParams] = useState<NtscParams>(PARAM_PRESETS['VHS EP']);
   const [presetId, setPresetId] = useState(PARAM_PRESET_NAMES.indexOf('VHS EP'));
-  const [heightId, setHeightId] = useState(2);   // 240
-  const [fpsId, setFpsId] = useState(3);         // 15
-  const [maxSecId, setMaxSecId] = useState(2);   // 10
+  // Every preset here keeps upstream's ringing filter on, and that alone is a
+  // real 2D FFT per field — genuinely heavy on a phone's CPU. Default to the
+  // lightest processing settings so the first thing anyone sees is a snappy
+  // preview, not a frozen-looking screen; bump these up once you've settled
+  // on a look and are ready to render for real.
+  const [heightId, setHeightId] = useState(0);   // 120
+  const [fpsId, setFpsId] = useState(1);         // 10
+  const [maxSecId, setMaxSecId] = useState(1);   // 5
 
   const [file, setFile] = useState<File | null>(null);
   const [duration, setDuration] = useState(0);
@@ -42,6 +47,10 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
 
   const [booting, setBooting] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // A live "how long has this been going" readout, so a slow phone never
+  // looks frozen — a real FFT-based filter on a weak CPU can genuinely take
+  // several seconds for one frame.
+  const [previewElapsed, setPreviewElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
 
@@ -89,7 +98,10 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
     const seq = ++previewSeq.current;
     const timer = setTimeout(async () => {
       setPreviewBusy(true);
+      setPreviewElapsed(0);
       setError(null);
+      const startedAt = performance.now();
+      const ticker = setInterval(() => setPreviewElapsed((performance.now() - startedAt) / 1000), 200);
       try {
         const image = await renderStill(video, scrub, params, RENDER_HEIGHTS[heightId]);
         if (seq === previewSeq.current) drawPreview(image);
@@ -98,6 +110,7 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
           setError(err instanceof Error ? err.message : 'preview failed');
         }
       } finally {
+        clearInterval(ticker);
         if (seq === previewSeq.current) {
           setPreviewBusy(false);
           setBooting(null);
@@ -221,7 +234,7 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
                 }}
                 className="glow"
               >
-                <span className="blink">●</span> {booting || 'processing frame'}
+                <span className="blink">●</span> {booting || `processing frame — ${previewElapsed.toFixed(1)}s`}
               </div>
             )}
           </div>
