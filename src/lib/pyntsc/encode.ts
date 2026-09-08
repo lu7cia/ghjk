@@ -25,6 +25,38 @@ export interface Encoder {
 
 /* ------------------------------------------------------------- webcodecs */
 
+/** WebM only carries VP8/VP9, and browsers differ on which they will encode —
+ *  Safari in particular is far pickier than Chrome. Probe rather than assume,
+ *  because discovering this at the end of a long render is the worst possible
+ *  time to find out. */
+const WEBM_CODECS = [
+  { codec: 'vp09.00.10.08', muxer: 'V_VP9' as const },
+  { codec: 'vp8', muxer: 'V_VP8' as const },
+];
+
+async function pickWebmCodec(
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number,
+): Promise<{ codec: string; muxer: 'V_VP9' | 'V_VP8' } | null> {
+  for (const candidate of WEBM_CODECS) {
+    try {
+      const support = await VideoEncoder.isConfigSupported({
+        codec: candidate.codec,
+        width,
+        height,
+        bitrate,
+        framerate: fps,
+      });
+      if (support.supported) return candidate;
+    } catch {
+      // A browser that rejects the query outright just means "not this one".
+    }
+  }
+  return null;
+}
+
 class WebCodecsEncoder implements Encoder {
   readonly kind = 'webcodecs' as const;
   private muxer: Muxer<ArrayBufferTarget>;
@@ -32,12 +64,18 @@ class WebCodecsEncoder implements Encoder {
   private frameDuration: number;
   private failure: Error | null = null;
 
-  constructor(width: number, height: number, private fps: number, bitrate: number) {
+  constructor(
+    width: number,
+    height: number,
+    private fps: number,
+    bitrate: number,
+    chosen: { codec: string; muxer: 'V_VP9' | 'V_VP8' },
+  ) {
     this.frameDuration = 1_000_000 / fps;
 
     this.muxer = new Muxer({
       target: new ArrayBufferTarget(),
-      video: { codec: 'V_VP9', width, height, frameRate: fps },
+      video: { codec: chosen.muxer, width, height, frameRate: fps },
       firstTimestampBehavior: 'offset',
     });
 
@@ -47,12 +85,16 @@ class WebCodecsEncoder implements Encoder {
     });
 
     this.encoder.configure({
-      codec: 'vp09.00.10.08',
+      codec: chosen.codec,
       width,
       height,
       bitrate,
       framerate: fps,
-      latencyMode: 'quality',
+      // The picture has already been through a tape emulation and is headed
+      // for a deliberately low bitrate, so spending encoder effort chasing
+      // fidelity buys nothing. 'realtime' is markedly faster, which matters
+      // when the whole render is running on a phone.
+      latencyMode: 'realtime',
     });
   }
 
@@ -129,8 +171,17 @@ class ReplayEncoder implements Encoder {
   }
 }
 
-export function createEncoder(width: number, height: number, fps: number, bitrate: number): Encoder {
-  return hasWebCodecs()
-    ? new WebCodecsEncoder(width, height, fps, bitrate)
-    : new ReplayEncoder(width, height, fps);
+export async function createEncoder(
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number,
+): Promise<Encoder> {
+  if (hasWebCodecs()) {
+    const chosen = await pickWebmCodec(width, height, fps, bitrate);
+    if (chosen) return new WebCodecsEncoder(width, height, fps, bitrate, chosen);
+  }
+  // No usable WebCodecs path: fall back to replaying the frames in real time
+  // into a MediaRecorder. Slower and lossier, but it works everywhere.
+  return new ReplayEncoder(width, height, fps);
 }

@@ -170,11 +170,18 @@ public/pyntsc/     vendored upstream ntsc.py + driver + ring pattern
 
 ## Known limits
 
-* **Video rendering is slow, and that is inherent.** This is CPU Python doing
-  per-scanline signal processing, one frame at a time. Expect roughly half a
-  second per frame at 240p — a 10-second clip at 15fps is around 150 frames.
-  The height, frame rate and length caps in the deck exist to keep that
-  bounded, and there is an ETA and an abort button.
+* **Video rendering is slow, and some of that is inherent.** This is CPU
+  Python doing per-scanline signal processing, one frame at a time. The deck
+  defaults to the lightest settings for that reason, and the RENDER button
+  shows a real estimate measured from the preview frame on the device you are
+  actually using. There is an ETA and an abort button once it starts, and the
+  finished tape reports where the time went — decoding, Python, encoding — so
+  a slow render can be diagnosed rather than guessed at.
+* **Frames are pulled by playing the clip, not by seeking to each timestamp.**
+  Seeking looks like the obvious approach and is a trap: phone camera footage
+  is long-GOP HEVC, so every seek throws the decoder back to a keyframe and
+  re-decodes forward. That cost dwarfed the signal processing on real footage
+  even though it was invisible against a short synthetic test clip.
 * **First video render needs network.** Pyodide and the numpy/scipy/opencv
   wheels are fetched from the pinned Pyodide CDN, then cached by the browser.
   To run fully offline, drop a Pyodide distribution somewhere static and set

@@ -7,8 +7,8 @@ import {
   type NtscParams,
 } from '../lib/pyntsc/params';
 import {
-  loadVideo, outputSize, renderStill, renderVideo, hasWebCodecs,
-  RENDER_HEIGHTS, RENDER_FPS, type RenderProgress,
+  loadVideo, outputSize, grabFrame, processFrame, renderVideo, hasWebCodecs,
+  RENDER_HEIGHTS, RENDER_FPS, type RenderProgress, type RenderTimings,
 } from '../lib/pyntsc/render';
 import { putAsset, uid } from '../lib/db';
 import type { Post } from '../lib/types';
@@ -51,18 +51,23 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
   // looks frozen — a real FFT-based filter on a weak CPU can genuinely take
   // several seconds for one frame.
   const [previewElapsed, setPreviewElapsed] = useState(0);
+  /** Measured seconds per frame on this device, from the last preview. */
+  const [frameCost, setFrameCost] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
 
   const [rendering, setRendering] = useState(false);
   const [progress, setProgress] = useState<RenderProgress | null>(null);
-  const [result, setResult] = useState<{ blob: Blob; url: string; width: number; height: number; seconds: number } | null>(null);
+  const [result, setResult] = useState<
+    { blob: Blob; url: string; width: number; height: number; seconds: number; timings: RenderTimings } | null
+  >(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const revokeRef = useRef<(() => void) | null>(null);
   const previewCanvas = useRef<HTMLCanvasElement>(null);
   const cancelRef = useRef({ cancelled: false });
   const previewSeq = useRef(0);
+  const sourceCache = useRef<{ key: string; image: ImageData } | null>(null);
 
   /* Pyodide boot progress, surfaced so the first-run download is not a mystery. */
   useEffect(() => pyNtsc.onProgress((p) => {
@@ -103,7 +108,19 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
       const startedAt = performance.now();
       const ticker = setInterval(() => setPreviewElapsed((performance.now() - startedAt) / 1000), 200);
       try {
-        const image = await renderStill(video, scrub, params, RENDER_HEIGHTS[heightId]);
+        // Decoding the source frame is expensive on long-GOP phone footage, so
+        // hold onto it: moving a slider only needs Python run again, not the
+        // video seeked again.
+        const key = `${scrub.toFixed(2)}@${RENDER_HEIGHTS[heightId]}`;
+        if (sourceCache.current?.key !== key) {
+          sourceCache.current = { key, image: await grabFrame(video, scrub, RENDER_HEIGHTS[heightId]) };
+        }
+
+        const pythonStart = performance.now();
+        const image = await processFrame(sourceCache.current.image, params);
+        // What one frame actually costs on this device, for an honest estimate.
+        setFrameCost((performance.now() - pythonStart) / 1000);
+
         if (seq === previewSeq.current) drawPreview(image);
       } catch (err) {
         if (seq === previewSeq.current) {
@@ -124,6 +141,7 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
   const chooseFile = async (f: File) => {
     setError(null);
     setResult(null);
+    sourceCache.current = null;
     revokeRef.current?.();
     try {
       const { video, revoke } = await loadVideo(f);
@@ -169,6 +187,7 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
       setResult({
         blob: res.blob, url: URL.createObjectURL(res.blob),
         width: res.width, height: res.height, seconds: res.seconds,
+        timings: res.timings,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'render failed');
@@ -193,6 +212,13 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
 
   const frameEstimate = file
     ? Math.floor(Math.min(duration, MAX_SECONDS[maxSecId]) * RENDER_FPS[fpsId])
+    : 0;
+
+  // The preview just ran one frame on this exact device, at the same height
+  // the render will use, so the cost of the whole thing is measured rather
+  // than guessed. Decoding overlaps with processing, so it barely shows.
+  const renderEstimate = frameCost > 0 && frameEstimate > 0
+    ? frameCost * frameEstimate
     : 0;
 
   return (
@@ -345,6 +371,10 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
             <Readout label="SIZE" value={`${result.width}×${result.height}`} />
             <Readout label="FILE" value={`${Math.round(result.blob.size / 1024)} KB`} accent="mg" />
             <Readout label="RENDER TIME" value={secs(result.seconds)} accent="am" />
+            {/* Where the time went, so a slow render is diagnosable. */}
+            <Readout label="· DECODING" value={`${result.timings.decode.toFixed(1)}s`} accent="" />
+            <Readout label="· PYTHON" value={`${result.timings.python.toFixed(1)}s`} accent="" />
+            <Readout label="· ENCODING" value={`${result.timings.encode.toFixed(1)}s`} accent="" />
             <div className="field" style={{ marginTop: 9 }}>
               <label>Caption</label>
               <textarea value={caption} onChange={(e) => setCaption(e.target.value)} style={{ minHeight: 52 }} />
@@ -363,6 +393,11 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
             onClick={render}
           >
             RENDER {frameEstimate ? `${frameEstimate} FRAMES` : 'TAPE'}
+            {renderEstimate > 0 && (
+              <span style={{ display: 'block', fontSize: 12, opacity: 0.75 }}>
+                ABOUT {secs(renderEstimate)}
+              </span>
+            )}
           </button>
         )}
       </div>
