@@ -53,6 +53,11 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
   const [previewElapsed, setPreviewElapsed] = useState(0);
   /** Measured seconds per frame on this device, from the last preview. */
   const [frameCost, setFrameCost] = useState(0);
+  /** How long the one-off Python runtime download and start-up took. */
+  const [bootSeconds, setBootSeconds] = useState(0);
+  const bootStart = useRef(0);
+  /** Pixel dimensions the signal chain is actually running at. */
+  const [procSize, setProcSize] = useState<{ width: number; height: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
 
@@ -69,7 +74,11 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
   const previewSeq = useRef(0);
   const sourceCache = useRef<{ key: string; image: ImageData } | null>(null);
 
-  /* Pyodide boot progress, surfaced so the first-run download is not a mystery. */
+  /* Pyodide boot progress, surfaced so the first-run download is not a mystery.
+     Boot is timed separately from frame processing: the runtime and its wheels
+     are tens of megabytes, and on a phone connection that download can dwarf
+     everything else. Folding it into the frame timer made processing look
+     hundreds of times slower than it is. */
   useEffect(() => pyNtsc.onProgress((p) => {
     const text: Record<string, string> = {
       runtime: 'downloading python runtime',
@@ -78,8 +87,24 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
       import: 'starting interpreter',
       ready: '',
     };
+    if (p.stage !== 'ready') {
+      if (bootStart.current === 0) bootStart.current = performance.now();
+    } else if (bootStart.current > 0) {
+      setBootSeconds((performance.now() - bootStart.current) / 1000);
+      bootStart.current = -1; // only the first, real boot is worth reporting
+    }
     setBooting(text[p.stage] ?? p.stage);
   }), []);
+
+  /* Start fetching the runtime the moment the tools are opened, so the
+     download overlaps with choosing a clip instead of stalling the first
+     frame. It is tens of megabytes; on a phone connection that is the single
+     longest wait in the whole flow. */
+  useEffect(() => {
+    pyNtsc.ready().catch((err) =>
+      setError(err instanceof Error ? err.message : 'could not start python'),
+    );
+  }, []);
 
   useEffect(() => () => {
     revokeRef.current?.();
@@ -103,10 +128,8 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
     const seq = ++previewSeq.current;
     const timer = setTimeout(async () => {
       setPreviewBusy(true);
-      setPreviewElapsed(0);
       setError(null);
-      const startedAt = performance.now();
-      const ticker = setInterval(() => setPreviewElapsed((performance.now() - startedAt) / 1000), 200);
+      let ticker = 0;
       try {
         // Decoding the source frame is expensive on long-GOP phone footage, so
         // hold onto it: moving a slider only needs Python run again, not the
@@ -115,11 +138,24 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
         if (sourceCache.current?.key !== key) {
           sourceCache.current = { key, image: await grabFrame(video, scrub, RENDER_HEIGHTS[heightId]) };
         }
+        const source = sourceCache.current.image;
+        setProcSize({ width: source.width, height: source.height });
 
-        const pythonStart = performance.now();
-        const image = await processFrame(sourceCache.current.image, params);
+        // Wait for the runtime before starting the clock. The first call has a
+        // large download hiding behind it, and counting that as frame time is
+        // what made processing look orders of magnitude slower than it is.
+        await pyNtsc.ready();
+
+        setPreviewElapsed(0);
+        const startedAt = performance.now();
+        ticker = window.setInterval(
+          () => setPreviewElapsed((performance.now() - startedAt) / 1000),
+          200,
+        );
+
+        const image = await processFrame(source, params);
         // What one frame actually costs on this device, for an honest estimate.
-        setFrameCost((performance.now() - pythonStart) / 1000);
+        setFrameCost((performance.now() - startedAt) / 1000);
 
         if (seq === previewSeq.current) drawPreview(image);
       } catch (err) {
@@ -329,6 +365,29 @@ export function VhsLab({ authorId, onPost }: { authorId: string; onPost: (p: Pos
                 accent="mg"
               />
               <Readout label="ENCODER" value={hasWebCodecs() ? 'WEBCODECS' : 'MEDIARECORDER'} accent="am" />
+
+              {/* Enough to diagnose a slow device from a screenshot, instead of
+                  guessing at it from a different machine. */}
+              <hr className="hr" />
+              <Readout
+                label="PROCESSING AT"
+                value={procSize ? `${procSize.width}×${procSize.height}` : '—'}
+              />
+              <Readout
+                label="PER FRAME"
+                value={frameCost > 0 ? `${frameCost.toFixed(2)}s` : '—'}
+                accent="mg"
+              />
+              <Readout
+                label="RUNTIME BOOT"
+                value={bootSeconds > 0 ? `${bootSeconds.toFixed(1)}s` : '—'}
+                accent="am"
+              />
+              <Readout
+                label="CORES"
+                value={String(navigator.hardwareConcurrency ?? '?')}
+                accent=""
+              />
             </div>
           )}
         </Panel>
