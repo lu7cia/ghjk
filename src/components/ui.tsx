@@ -181,7 +181,7 @@ export function Toggle({
       style={{ width: '100%', background: 'none', border: 0, cursor: 'pointer', padding: '3px 0' }}
     >
       <span className="stepper__name">{name}</span>
-      <span className="stepper__value" style={{ minWidth: 66, color: value ? 'var(--phos)' : '#5a6472' }}>
+      <span className="stepper__value" style={{ minWidth: 66, color: value ? 'var(--phos)' : '#4a554a' }}>
         {value ? 'ON' : 'OFF'}
       </span>
     </button>
@@ -192,7 +192,7 @@ export function Toggle({
 
 export function Readout({ label, value, accent = 'cy' }: { label: string; value: string; accent?: 'cy' | 'mg' | 'am' | '' }) {
   return (
-    <div className="row" style={{ justifyContent: 'space-between', borderBottom: '1px solid #1c2432', padding: '2px 0' }}>
+    <div className="row" style={{ justifyContent: 'space-between', borderBottom: '1px solid #1e2a1a', padding: '2px 0' }}>
       <span className="dim" style={{ fontSize: 12, letterSpacing: '.1em' }}>{label}</span>
       <span className={accent ? `glow-${accent}` : 'glow'} style={{ fontSize: 13 }}>{value}</span>
     </div>
@@ -206,7 +206,7 @@ export function StatusBar({ tone = 'info', children }: { tone?: 'info' | 'warn' 
     <div
       className="row"
       style={{
-        border: `1px solid ${color}44`, background: '#04060a', color,
+        border: `1px solid ${color}44`, background: 'var(--pit)', color,
         padding: '4px 10px', fontSize: 12, letterSpacing: '.06em',
       }}
     >

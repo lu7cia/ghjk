@@ -1,62 +1,56 @@
 # Third-party code and attribution
 
-## ntsc-rs
+## NTSC video emulator (the video pipeline)
 
-The composite/VHS video effect in `src/lib/ntsc/` is adapted from
-[**ntsc-rs**](https://github.com/ntsc-rs/ntsc-rs) by **valadaptive**.
+The video effect is the **upstream Python NTSC emulator**, running unmodified in
+the browser under Pyodide. It lives in `public/pyntsc/ntsc.py`.
 
-ntsc-rs is a CPU implementation in Rust that walks each scanline as a signal and
-runs real IIR filters along it. It has no browser-WASM build target, so this is
-not a compile of that project — it is a re-expression of its pipeline as a WebGL2
-fragment shader that runs at video rate:
+Upstream is a Python 3.6 rewrite of
+[joncampbell123/composite-video-simulator](https://github.com/joncampbell123/composite-video-simulator),
+written for analog-artifact-removal research. `public/pyntsc/UPSTREAM_README.md`
+is upstream's own documentation of the artifacts it models, kept verbatim.
 
-* A one-sided IIR lowpass becomes a set of exponentially-decaying taps sampled
-  backwards along the scan direction.
-* A geometric row displacement (edge wave, head switching, tracking) becomes an
-  offset applied to the sample coordinate before the texture fetch.
-* The chroma modulate/demodulate round trip is reduced to the residue it leaves
-  behind — dot crawl and rainbow fringing — rather than being run in full.
+This is not a reimplementation or an approximation. `Ntsc.composite_layer` is
+called directly, per field, per frame. Everything the GUI exposes is a real
+attribute on that class.
 
-Stage names and their ordering in `src/lib/ntsc/shader.ts` deliberately mirror
-`NtscEffect::apply_effect_to_yiq_field` in `crates/ntscrs/src/ntsc.rs` so the two
-can be read side by side.
+### Changes made to ntsc.py
 
-Values taken directly from upstream:
+The source is otherwise untouched. Every change is marked with a `ghjk:` comment
+and exists only because upstream targeted numpy 1.x, while Pyodide ships
+numpy 2.4:
 
-| Value | Source |
+| Change | Why |
 | --- | --- |
-| `NTSC_RATE` = (315000000 / 88) × 4 | `crates/ntscrs/src/ntsc.rs` |
-| VHS SP/LP/EP luma & chroma cutoffs, chroma delay | `crates/ntscrs/src/settings/standard.rs` |
-| RGB↔YIQ matrices | `crates/ntscrs/src/yiq_fielding.rs` |
-| fBm gain (1/√2) and lacunarity (2.0) for edge wave | `crates/ntscrs/src/ntsc.rs` |
+| `np.float` → `np.float64` | The alias was removed in numpy 1.24. |
+| `from scipy.ndimage.interpolation import shift` → `from scipy.ndimage import shift` | Moved in scipy 1.10. |
+| `_wrap_i32` / `_wrap_u32` helpers, used in `XorWowRandom` and `vhs_head_switching` | numpy 1.x silently wrapped out-of-range values into fixed-width integers; numpy 2 raises `OverflowError`. The helpers reproduce the original C-style wraparound exactly, so the RNG sequence and the head-switching maths are unchanged. |
+
+No filter, coefficient, or algorithm was altered.
+
+`public/pyntsc/driver.py` is ours, not upstream. It only marshals pixels in and
+out and maps a settings dict onto the `Ntsc` object.
+
+`public/pyntsc/ringPattern.npy` is upstream's measured ringing pattern, used by
+`ringing2()`.
 
 ### Licence
 
-ntsc-rs is triple-licensed **MIT / Apache-2.0 / ISC** for all source files
-outside `crates/gui`. Everything adapted here comes from `crates/ntscrs`, which
-is covered by that permissive licensing. The `crates/gui` directory, which is
-licensed differently, was not used.
+Upstream ships no licence file. It is published as a research tool derived from
+composite-video-simulator (LGPL 2.1). The source is vendored here unmodified
+apart from the compatibility fixes above, with attribution, and is not
+relicensed. If you intend to distribute this commercially, resolve the licensing
+with the upstream author first.
 
-```
-Copyright © valadaptive
+## Pyodide
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
+Python in the browser, via [Pyodide](https://pyodide.org/) (Mozilla Public
+License 2.0). The runtime and the numpy / scipy / opencv-python wheels are
+fetched from the pinned Pyodide CDN on first use.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## webm-muxer
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
+WebM muxing for the WebCodecs encode path, by Vanilagy — MIT.
 
 ## iTunes Search API
 

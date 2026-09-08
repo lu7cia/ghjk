@@ -8,7 +8,7 @@ import { degradeImage, DEGRADE_PRESETS } from '../lib/degrade';
 import type { CharacterConfig, HabitatConfig } from '../lib/types';
 
 const FOG_COLORS = [
-  '#0a0c14', '#141821', '#1c1410', '#2a0a12', '#0a1a12',
+  'var(--void)', '#141821', '#1c1410', '#2a0a12', '#0a1a12',
   '#101a2a', '#1a0f24', '#241a0a', '#0e0e0e', '#2a2a2f',
 ];
 
@@ -51,13 +51,13 @@ export function HabitatEditor({ character, habitat, onChange }: Props) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 12, height: '100%' }}>
+    <div className="editor-split">
       <Panel
         title="HABITAT / PREVIEW"
-        bodyStyle={{ padding: 8, height: 'calc(100% - 30px)' }}
-        style={{ minHeight: 0 }}
+        bodyStyle={{ padding: 8 }}
+        className="editor-split__pane"
       >
-        <div className="crt" style={{ height: '100%', minHeight: 320, position: 'relative' }}>
+        <div className="crt" style={{ aspectRatio: '4/3', position: 'relative' }}>
           <CharacterCanvas
             character={character}
             habitat={habitat}
@@ -77,7 +77,7 @@ export function HabitatEditor({ character, habitat, onChange }: Props) {
         </div>
       </Panel>
 
-      <div className="stack scroll" style={{ minHeight: 0, paddingRight: 4 }}>
+      <div className="stack scroll editor-split__rail">
         {status && <StatusBar>{status}</StatusBar>}
 
         <Panel title="LOCATION" riveted>

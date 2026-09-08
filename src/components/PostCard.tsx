@@ -33,7 +33,7 @@ export function PostCard({ post, onDelete }: { post: Post; onDelete?: (id: strin
       )}
 
       {post.caption && (
-        <p style={{ margin: '0 0 4px', fontSize: 12, lineHeight: 1.5, color: '#c0cad4', whiteSpace: 'pre-wrap' }}>
+        <p style={{ margin: '0 0 4px', fontSize: 12, lineHeight: 1.5, color: '#b6c4ac', whiteSpace: 'pre-wrap' }}>
           {post.caption}
         </p>
       )}

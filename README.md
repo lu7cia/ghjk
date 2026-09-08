@@ -11,7 +11,8 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:5173. Works on a phone — the layout collapses to a
+single column with a bottom nav bar.
 
 ---
 
@@ -78,26 +79,39 @@ order a camera actually did it:
 Presets: `UNTOUCHED`, `DIGICAM 2003`, `WEBCAM 1999`, `DISPOSABLE`,
 `CURSED JPEG`, `PHOTO BOOTH`. A 3.2 MB source lands at ~17 KB on `CURSED JPEG`.
 
-### VHS video — `src/lib/ntsc/`
+### VHS video — `public/pyntsc/`, `src/lib/pyntsc/`
 
-A real-time GLSL adaptation of the [ntsc-rs](https://github.com/ntsc-rs/ntsc-rs)
-composite/VHS pipeline. See [THIRD_PARTY.md](THIRD_PARTY.md) for attribution and
-licensing — the short version is that ntsc-rs's core is MIT/Apache/ISC, this
-adapts it, and it is not a compile of their Rust.
+The **upstream Python NTSC emulator runs in your browser**, unmodified, under
+Pyodide. Not a shader approximating it — `Ntsc.composite_layer()` is called
+directly, per field, per frame, with numpy and scipy doing the filtering.
 
-The picture is encoded to YIQ and then luma and chroma are band-limited
-*independently and at wildly different rates* — chroma to roughly 320 kHz against
-luma's 2.4 MHz at SP speed. That ratio is the single most recognisable property
-of VHS. On top of that: dot crawl, rainbow fringing on luma edges, chroma delay,
-per-row chroma phase error, dropped chroma lines, head-switching tears, tracking
-noise, edge wave, anisotropic dropout, ringing and tape smear — applied in the
-same order ntsc-rs applies them.
+Upstream is a Python rewrite of
+[composite-video-simulator](https://github.com/joncampbell123/composite-video-simulator),
+and it models dot crawl, ringing, Y/C delay error, rainbow effects, chrominance
+noise, head-switching noise, luminance noise and oversaturation. See
+[THIRD_PARTY.md](THIRD_PARTY.md) for attribution, licensing, and the three
+numpy-2 compatibility fixes that are the only changes to the source.
 
-Presets: `CLEAN`, `BROADCAST`, `VHS SP`, `VHS EP`, `CAMCORDER`,
-`THIRD GEN DUB`, `DEAD CHANNEL`.
+The GUI in `VhsLab` exposes the real attributes on that class — tape speed,
+edge wave, chroma loss, ringing power, subcarrier amplitude, scanline phase
+shift and the rest. **RANDOMIZE** calls upstream's own `random_ntsc()`.
 
-The live preview and the exported file run through the same code path, so what
-you see is what you get.
+Working on a clip goes:
+
+1. **Load a tape.** First time only, the Python runtime and numpy/scipy/opencv
+   download (~40 MB) and cache.
+2. **Tune on one frame.** Scrub anywhere, change anything, and the still
+   re-renders through Python. The preview is the same code path as the render,
+   so it cannot lie to you about the output.
+3. **Render.** Frames are pulled by seeking, processed, and encoded with
+   WebCodecs at explicit timestamps — so a render that takes four minutes still
+   plays back at the right speed. A live preview and an ETA run alongside.
+
+Presets: `BROADCAST`, `VHS SP`, `VHS EP`, `CAMCORDER`, `THIRD GEN DUB`,
+`DEAD CHANNEL`, `NO COLOUR`.
+
+Photos can take the same treatment — switch on **composite pass** in the photo
+composer and the degraded still goes through the identical chain.
 
 ### Music — `src/lib/music.ts`
 
@@ -138,24 +152,36 @@ src/
     faces.ts         128x128 painted face textures
     habitat.ts       painted backdrop presets
   lib/
-    ntsc/            GLSL port of the ntsc-rs pipeline
-      shader.ts        the pipeline itself
-      presets.ts       tape speeds, cutoff -> blur radius maths
-      renderer.ts      WebGL2 runner + image/video export
+    pyntsc/          the Python NTSC emulator, driven from the browser
+      client.ts        main-thread handle on the worker
+      worker.ts        boots Pyodide, imports upstream ntsc.py
+      params.ts        the Ntsc attribute surface + presets
+      render.ts        frame-by-frame clip rendering
+      encode.ts        WebCodecs encode, MediaRecorder fallback
     degrade.ts       photo degradation
     music.ts         iTunes search + preview player
     db.ts            IndexedDB / localStorage persistence
   components/      UI
+    VhsLab.tsx       the video tools
+    WinampPlayer.tsx the media player
   data/seed.ts     the other inhabitants
+public/pyntsc/     vendored upstream ntsc.py + driver + ring pattern
 ```
 
 ## Known limits
 
-* **Video export runs in real time.** The clip is played through the shader and
-  the output is captured with `MediaRecorder`, so a 30-second video takes 30
-  seconds. WebCodecs would allow faster-than-realtime, but support is uneven
-  enough that the reliable path won. Keep clips short.
-* **WebGL2 is required.** The character viewport and the VHS effect both need it.
-* Exported video is WebM (VP9/VP8) wherever the browser supports it.
+* **Video rendering is slow, and that is inherent.** This is CPU Python doing
+  per-scanline signal processing, one frame at a time. Expect roughly half a
+  second per frame at 240p — a 10-second clip at 15fps is around 150 frames.
+  The height, frame rate and length caps in the deck exist to keep that
+  bounded, and there is an ETA and an abort button.
+* **First video render needs network.** Pyodide and the numpy/scipy/opencv
+  wheels are fetched from the pinned Pyodide CDN, then cached by the browser.
+  To run fully offline, drop a Pyodide distribution somewhere static and set
+  `VITE_PYODIDE_BASE` (or `window.__GHJK_PYODIDE_BASE__`) to point at it.
+* Without WebCodecs the encoder falls back to holding frames as stills and
+  replaying them into a `MediaRecorder`, which is slower and lossier.
+* **WebGL2 is required** for the character viewport.
+* Exported video is WebM (VP9/VP8).
 * Feed cards each hold a live WebGL context, so they render at 160×120 — browsers
   cap how many contexts a page may hold.

@@ -39,7 +39,7 @@ export function ProfileView({ profile, posts, editable, onChange, onDeletePost }
 
   return (
     <div className="scroll" style={{ height: '100%', paddingRight: 4 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) minmax(0,1fr)', gap: 12 }}>
+      <div className="profile-split">
 
         {/* -------------------------------------------------------- left rail */}
         <div className="stack">
@@ -70,7 +70,7 @@ export function ProfileView({ profile, posts, editable, onChange, onDeletePost }
                 className="center"
                 style={{
                   width: 76, height: 76, flexShrink: 0,
-                  background: '#02040a', border: '1px solid #263042',
+                  background: '#030603', border: '1px solid #2a3524',
                   boxShadow: 'var(--bevel-in)', overflow: 'hidden',
                 }}
               >
@@ -171,7 +171,7 @@ export function ProfileView({ profile, posts, editable, onChange, onDeletePost }
             </Panel>
           ) : (
             <Panel title="ABOUT" riveted>
-              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: '#c0cad4', whiteSpace: 'pre-wrap' }}>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: '#b6c4ac', whiteSpace: 'pre-wrap' }}>
                 {profile.bio || <span className="dim">Nothing written yet.</span>}
               </p>
               {profile.hobbies.length > 0 && (

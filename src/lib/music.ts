@@ -153,6 +153,28 @@ class PreviewPlayer {
     this.audio?.pause();
     this.setCurrent(null);
   }
+
+  /** Playback position, for the player's readouts. */
+  get position(): { current: number; duration: number } {
+    const a = this.audio;
+    return {
+      current: a?.currentTime ?? 0,
+      duration: Number.isFinite(a?.duration) ? (a?.duration ?? 0) : 0,
+    };
+  }
+
+  get volume(): number {
+    return this.audio?.volume ?? 0.7;
+  }
+
+  setVolume(v: number): void {
+    this.ensure().volume = Math.max(0, Math.min(1, v));
+  }
+
+  seek(seconds: number): void {
+    const a = this.audio;
+    if (a && Number.isFinite(a.duration)) a.currentTime = Math.max(0, Math.min(a.duration, seconds));
+  }
 }
 
 export const previewPlayer = new PreviewPlayer();

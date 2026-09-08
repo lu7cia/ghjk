@@ -49,15 +49,15 @@ export function CharacterCreator({ character, habitat, onChange }: Props) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 12, height: '100%' }}>
+    <div className="editor-split">
       {/* ---------------------------------------------------------- viewport */}
       <Panel
         title="SUBJECT / RENDER"
         right={<span className="dim" style={{ fontSize: 11 }}>DRAG TO ROTATE</span>}
-        bodyStyle={{ padding: 8, height: 'calc(100% - 30px)' }}
-        style={{ minHeight: 0 }}
+        bodyStyle={{ padding: 8 }}
+        className="editor-split__pane"
       >
-        <div className="crt" style={{ height: '100%', minHeight: 320, position: 'relative' }}>
+        <div className="crt" style={{ aspectRatio: '4/3', position: 'relative' }}>
           <CharacterCanvas
             character={character}
             habitat={habitat}
@@ -81,7 +81,7 @@ export function CharacterCreator({ character, habitat, onChange }: Props) {
       </Panel>
 
       {/* ---------------------------------------------------------- controls */}
-      <div className="stack scroll" style={{ minHeight: 0, paddingRight: 4 }}>
+      <div className="stack scroll editor-split__rail">
         <Tabs tabs={TABS} value={tab} onChange={setTab} />
 
         {status && <StatusBar>{status}</StatusBar>}

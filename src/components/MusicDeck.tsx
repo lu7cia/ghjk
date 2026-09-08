@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Panel, FileButton, StatusBar } from './ui';
+import { WinampPlayer } from './WinampPlayer';
 import { searchTracks, previewPlayer } from '../lib/music';
 import { putAsset, uid, assetUrl } from '../lib/db';
 import type { Track } from '../lib/types';
@@ -76,9 +77,13 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
     }
   };
 
+  const playlist = [...favourites.filter((t): t is Track => Boolean(t)), ...ownTracks];
+
   return (
     <div className="stack">
       {status && <StatusBar>{status}</StatusBar>}
+
+      <WinampPlayer title="the silence" tracks={playlist} />
 
       {/* ---------------------------------------------------------- top three */}
       <Panel title="TOP 3" riveted>
@@ -95,14 +100,14 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
                   padding: 6,
                   cursor: editable ? 'pointer' : 'default',
                   outline: active ? '1px solid var(--phos)' : 'none',
-                  boxShadow: active ? '0 0 12px rgba(109,255,122,.35)' : undefined,
+                  boxShadow: active ? '0 0 12px rgba(85,255,98,.4)' : undefined,
                 }}
               >
                 <div
                   className="center"
                   style={{
-                    aspectRatio: '1', background: '#02040a', marginBottom: 6,
-                    border: '1px solid #1c2432', overflow: 'hidden', position: 'relative',
+                    aspectRatio: '1', background: '#030603', marginBottom: 6,
+                    border: '1px solid #1e2a1a', overflow: 'hidden', position: 'relative',
                   }}
                 >
                   {t?.artworkUrl ? (
@@ -114,18 +119,7 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
                   ) : (
                     <span className="dim" style={{ fontSize: 26 }}>{i + 1}</span>
                   )}
-                  {t?.previewUrl && (
-                    <button
-                      className="btn btn--sm"
-                      style={{ position: 'absolute', right: 3, bottom: 3, padding: '1px 6px' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        previewPlayer.toggle(t.id, t.previewUrl!);
-                      }}
-                    >
-                      {playingId === t.id ? '❚❚' : '▶'}
-                    </button>
-                  )}
+
                 </div>
                 <div className="glow" style={{ fontSize: 12, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
                   {t?.title ?? <span className="dim">EMPTY SLOT</span>}
@@ -179,7 +173,7 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
               <div
                 key={t.id}
                 className="row"
-                style={{ gap: 8, padding: '4px 0', borderBottom: '1px solid #161d28' }}
+                style={{ gap: 8, padding: '4px 0', borderBottom: '1px solid #1a2216' }}
               >
                 {t.artworkUrl && (
                   <img
@@ -187,11 +181,11 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
                     alt=""
                     width={34}
                     height={34}
-                    style={{ imageRendering: 'pixelated', border: '1px solid #1c2432' }}
+                    style={{ imageRendering: 'pixelated', border: '1px solid #1e2a1a' }}
                   />
                 )}
                 <div className="grow" style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: '#d4dde6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 12, color: '#cbd8bd', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {t.title}
                   </div>
                   <div className="dim" style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -249,7 +243,7 @@ export function MusicDeck({ favourites, ownTracks, onFavourites, onOwnTracks, ed
                   {String(i + 1).padStart(2, '0')}
                 </span>
                 <OwnTrackButton track={t} playingId={playingId} />
-                <span className="grow" style={{ fontSize: 12, color: '#d4dde6', overflowWrap: 'anywhere' }}>
+                <span className="grow" style={{ fontSize: 12, color: '#cbd8bd', overflowWrap: 'anywhere' }}>
                   {t.title}
                 </span>
                 {editable && (

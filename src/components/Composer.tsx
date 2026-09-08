@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Panel, Stepper, FileButton, StatusBar, Readout } from './ui';
-import { VhsPreview } from './VhsPreview';
+import { VhsLab } from './VhsLab';
 import { degradeImage, DEGRADE_PRESETS } from '../lib/degrade';
-import { applyNtscToVideo } from '../lib/ntsc/renderer';
-import { PRESETS, PRESET_NAMES } from '../lib/ntsc/presets';
+import { processImageData } from '../lib/pyntsc/render';
+import { PARAM_PRESETS, PARAM_PRESET_NAMES } from '../lib/pyntsc/params';
 import { putAsset, uid } from '../lib/db';
 import type { Post } from '../lib/types';
 
@@ -24,16 +24,12 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
   const [photoPresetId, setPhotoPresetId] = useState(1);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<{ url: string; blob: Blob; w: number; h: number; from: number } | null>(null);
-
-  /* --- video --- */
-  const [vhsPresetId, setVhsPresetId] = useState(2);
-  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState(0);
-  const videoUrlRef = useRef<string | null>(null);
+  /* Optional second pass: the degraded still through the Python signal chain. */
+  const [compositePass, setCompositePass] = useState(false);
+  const [compositePresetId, setCompositePresetId] = useState(PARAM_PRESET_NAMES.indexOf('VHS EP'));
 
   const photoPreset = DEGRADE_PRESETS[photoPresetId];
-  const vhsPreset = PRESETS[PRESET_NAMES[vhsPresetId]];
+
 
   /* Re-run degradation whenever the file or preset changes, so what is on
      screen is always the thing that would actually be posted. */
@@ -46,8 +42,32 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
       setBusy(true);
       setStatus({ tone: 'info', text: 'Degrading…' });
       try {
-        const res = await degradeImage(photoFile, photoPreset);
+        let res = await degradeImage(photoFile, photoPreset);
         if (cancelled) return;
+
+        if (compositePass) {
+          setStatus({ tone: 'info', text: 'Running composite pass in Python…' });
+          const bitmap = await createImageBitmap(res.blob);
+          const canvas = document.createElement('canvas');
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+
+          const processed = await processImageData(
+            ctx.getImageData(0, 0, canvas.width, canvas.height),
+            PARAM_PRESETS[PARAM_PRESET_NAMES[compositePresetId]],
+          );
+          if (cancelled) return;
+          ctx.putImageData(processed, 0, 0);
+
+          const blob = await new Promise<Blob>((resolve, reject) =>
+            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/jpeg', 0.7),
+          );
+          res = { ...res, blob, finalBytes: blob.size };
+        }
+
         createdUrl = URL.createObjectURL(res.blob);
         setPhotoPreview((prev) => {
           if (prev) URL.revokeObjectURL(prev.url);
@@ -62,29 +82,7 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
     })();
 
     return () => { cancelled = true; };
-  }, [photoFile, photoPreset]);
-
-  useEffect(() => () => {
-    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
-  }, []);
-
-  const loadVideo = (file: File) => {
-    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
-    const url = URL.createObjectURL(file);
-    videoUrlRef.current = url;
-
-    const el = document.createElement('video');
-    el.src = url;
-    el.muted = true;
-    el.loop = true;
-    el.playsInline = true;
-    el.onloadeddata = () => {
-      el.play().catch(() => undefined);
-      setVideoEl(el);
-    };
-    el.onerror = () => setStatus({ tone: 'err', text: 'That video would not decode. Try MP4 or WebM.' });
-    setVideoFile(file);
-  };
+  }, [photoFile, photoPreset, compositePass, compositePresetId]);
 
   const postPhoto = async () => {
     if (!photoPreview || !photoFile) return;
@@ -106,33 +104,6 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
       setStatus({ tone: 'err', text: err instanceof Error ? err.message : 'post failed' });
     } finally {
       setBusy(false);
-    }
-  };
-
-  const postVideo = async () => {
-    if (!videoFile) return;
-    setBusy(true);
-    setProgress(0);
-    setStatus({
-      tone: 'warn',
-      text: 'Encoding in real time — this takes as long as the clip does. Leave the tab open.',
-    });
-    try {
-      const { blob, width, height } = await applyNtscToVideo(videoFile, vhsPreset, (p) => setProgress(p.progress));
-      const mediaAsset = await putAsset(blob, 'video', videoFile.name);
-      onPost({
-        id: uid('p_'), authorId, createdAt: Date.now(), caption,
-        kind: 'video', mediaAsset, originalAsset: null, width, height,
-      });
-      setVideoFile(null);
-      setVideoEl(null);
-      setCaption('');
-      setStatus({ tone: 'info', text: `Posted — ${kb(blob.size)} of tape.` });
-    } catch (err) {
-      setStatus({ tone: 'err', text: err instanceof Error ? err.message : 'encode failed' });
-    } finally {
-      setBusy(false);
-      setProgress(0);
     }
   };
 
@@ -179,6 +150,25 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
             onChange={setPhotoPresetId}
           />
 
+          <div className="stepper">
+            <span className="stepper__name">Composite pass</span>
+            <button
+              className="stepper__value"
+              style={{ cursor: 'pointer', color: compositePass ? 'var(--phos)' : '#4a554a', minWidth: 66 }}
+              onClick={() => setCompositePass(!compositePass)}
+            >
+              {compositePass ? 'ON' : 'OFF'}
+            </button>
+          </div>
+          {compositePass && (
+            <Stepper
+              name="Signal"
+              value={compositePresetId}
+              options={PARAM_PRESET_NAMES}
+              onChange={setCompositePresetId}
+            />
+          )}
+
           {photoPreview && (
             <>
               <div className="crt" style={{ marginTop: 10, padding: 8 }}>
@@ -212,59 +202,31 @@ export function Composer({ authorId, onPost }: { authorId: string; onPost: (p: P
         </Panel>
       )}
 
-      {/* ------------------------------------------------------------- video */}
-      {mode === 'VIDEO' && (
-        <Panel title="UPLOAD VIDEO" riveted>
-          <div className="row" style={{ gap: 6, marginBottom: 10 }}>
-            <FileButton accept="video/*" className="btn btn--primary" onFile={(f) => loadVideo(f[0])}>
-              CHOOSE VIDEO
-            </FileButton>
-            {videoFile && <span className="dim" style={{ fontSize: 11 }}>{videoFile.name}</span>}
-          </div>
+      {mode === 'VIDEO' && <VhsLab authorId={authorId} onPost={onPost} />}
 
-          <Stepper name="Tape" value={vhsPresetId} options={PRESET_NAMES} onChange={setVhsPresetId} />
-
-          {videoEl && (
-            <div className="crt" style={{ marginTop: 10, aspectRatio: '4/3' }}>
-              <VhsPreview video={videoEl} settings={vhsPreset} style={{ width: '100%', height: '100%' }} />
-            </div>
-          )}
-
-          {busy && (
-            <div style={{ marginTop: 10 }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="dim" style={{ fontSize: 11 }}>ENCODING</span>
-                <span className="glow" style={{ fontSize: 11 }}>{Math.round(progress * 100)}%</span>
-              </div>
-              <div style={{ height: 8, background: '#04060a', border: '1px solid #263042', marginTop: 3 }}>
-                <div
-                  style={{
-                    height: '100%', width: `${progress * 100}%`,
-                    background: 'linear-gradient(90deg,#2f8c3a,#6dff7a)',
-                    boxShadow: '0 0 10px rgba(109,255,122,.6)',
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="field" style={{ marginTop: 10 }}>
-            <label>Caption</label>
-            <textarea value={caption} onChange={(e) => setCaption(e.target.value)} style={{ minHeight: 56 }} />
-          </div>
-
-          <button className="btn btn--primary" style={{ width: '100%' }} disabled={!videoFile || busy} onClick={postVideo}>
-            {busy ? `ENCODING ${Math.round(progress * 100)}%` : 'PROCESS & POST'}
-          </button>
-
-          <p className="dim" style={{ fontSize: 11, margin: '8px 0 0' }}>
-            Encoding runs the clip through in real time and records the output, so a
-            30-second video takes 30 seconds. Keep it short.
+      {/* -------------------------------------------------------------- text */}
+      {mode !== 'VIDEO' && (
+        <Panel title="what happens to your uploads" riveted>
+          <p style={{ fontSize: 12, lineHeight: 1.7, color: '#a4b096', margin: 0 }}>
+            Photos are resampled to a period-appropriate sensor size, chroma is thrown away at
+            quarter resolution, the palette is crushed and dithered, and the result is re-saved as
+            JPEG — several times over on the harsher presets. Generation loss is doing the work,
+            not a filter laid on top.
+          </p>
+          <hr className="hr" />
+          <p style={{ fontSize: 12, lineHeight: 1.7, color: '#a4b096', margin: 0 }}>
+            Switch on the composite pass and the still goes through the same Python NTSC emulator
+            the video tools use — real dot crawl, ringing and chroma bleed rather than an
+            approximation of them.
+          </p>
+          <hr className="hr" />
+          <p className="dim" style={{ fontSize: 11, margin: 0 }}>
+            Everything stays on this device. Media lives in IndexedDB, profile text in
+            localStorage. Nothing is uploaded anywhere.
           </p>
         </Panel>
       )}
 
-      {/* -------------------------------------------------------------- text */}
       {mode === 'TEXT' && (
         <Panel title="BULLETIN" riveted>
           <textarea
